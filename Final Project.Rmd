@@ -121,7 +121,7 @@ test_results <- as.data.frame(c())
 # Exploratory Analysis
 ```{r}
 # trying to predict the rating
-qmplot(longitude, latitude, data = us_rest2, colour = I('red'), size = I(3), darken = .3)
+qmplot(longitude, latitude, data = us_rest2, colour = I('red'), size = I(3), darken = .3, fullpage=TRUE)
  
 
 us_rest2 %>%

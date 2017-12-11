@@ -108,23 +108,44 @@ test_results <- as.data.frame(c())
 
 # Exploratory Analysis
 ```{r}
-# trying to predict the rating
+# map of 10 largest cities in the US
 qmplot(longitude, latitude, data = us_rest, colour = I('red'), size = I(3), darken = .3, zoom = 5)
  
 
 us_rest %>%
   filter(rating>=3.5) %>%
-    ggplot(aes(x=rating))+geom_histogram(stat="bin", binwidth=.5)
+    ggplot(aes(x=rating))+geom_histogram(stat="bin", binwidth=.5) + 
+    labs(title = "Count of US Restaurants by Respective Rating")
 
-us_rest2 %>%
+# scatterplot of average restaurant ratings for each city
+us_rest %>%
   filter(!is.na(city))%>%
   group_by(city) %>%
     summarise(avg_rating=mean(rating))%>%
       arrange(avg_rating) %>%
-        ggplot(aes(x=city, y=avg_rating))+geom_point()
+        ggplot(aes(x=city, y=avg_rating))+geom_point() + 
+        labs(y = "average rating", title = "Average Rating by City")
+summary(us_rest$rating)
 
+# boxplot of distance from downtown all restaruants are
+us_rest %>%
+  filter(!is.na(city))%>%
+  group_by(city) %>%
+        ggplot(aes(x=city, y=distance))+geom_boxplot()
 
-summary(us_rest2$rating)
+# looking at the association betwen distance
+us_rest %>%
+  filter(!is.na(city), city == "Chicago")%>%
+  group_by(city) %>%
+        ggplot(aes(x=distance, y=rating)) + geom_point() # + geom_smooth()
+
+cor(us_rest$distance, us_rest$rating)
+
+# plot looks messy with all the of regression lines
+us_rest %>%
+  filter(!is.na(city))%>%
+        ggplot(aes(x=distance, y=rating)) + geom_point() + labs(title = "Assocation between Distance and Rating") #+ geom_smooth() 
+
 ```
 
 

@@ -133,18 +133,25 @@ us_rest %>%
   group_by(city) %>%
         ggplot(aes(x=city, y=distance))+geom_boxplot()
 
-# looking at the association betwen distance
+# looking at the association between distance and rating for Chicago
 us_rest %>%
   filter(!is.na(city), city == "Chicago")%>%
   group_by(city) %>%
         ggplot(aes(x=distance, y=rating)) + geom_point() # + geom_smooth()
 
-cor(us_rest$distance, us_rest$rating)
-
-# plot looks messy with all the of regression lines
+# plot looks messy with all the of regression lines, but this shows the association
+# between distance and rating without grouping by a city
 us_rest %>%
   filter(!is.na(city))%>%
-        ggplot(aes(x=distance, y=rating)) + geom_point() + labs(title = "Assocation between Distance and Rating") #+ geom_smooth() 
+        ggplot(aes(x=distance, y=rating, color = price_2)) + geom_point(position = "jitter") + labs(title = "Assocation between Distance and Rating") #+ geom_smooth() 
+cor(us_rest$distance, us_rest$rating)
+
+# relationship between review count and rating relative to price of restaurant
+us_rest %>%
+  filter(!is.na(city))%>%
+        ggplot(aes(x=review_count, y=rating, color = price_2)) + geom_point(position = "jitter", alpha = 0.4) + labs(title = "Assocation between Review Count and Rating", x = "review count") #+ geom_smooth() 
+cor(us_rest$review_count, us_rest$rating)
+
 
 ```
 
@@ -167,6 +174,20 @@ test <- us_rest %>%
 model_formula <- 
   as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude")
 model_mlm <- lm(model_formula, data=train)
+
+# calculate train MSE for comparison
+y_hat <- predict(model_mlm, newdata=train)
+train <- mutate(train, y_hat = y_hat)
+
+
+# Determine accuracy of model
+check <- train %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+check
+
+
 # Get predictions from test set
 y_hat <- predict(model_mlm, newdata=test)
 test <- mutate(test, y_hat = y_hat)
@@ -262,12 +283,38 @@ test <- us_rest %>%
 model_spline <- smooth.spline(x=train$review_count, y=train$rating, df=10) 
 # play around with degrees of freedom
 
-# Get predictions from test set
-y_hat <- predict(model_spline, x=test$review_count)
-test <- mutate(test, y_hat = y_hat$y)
+# Calculate train MSE for comparison
+y_hat <- predict(model_spline, x=train$review_count)
+train <- mutate(train, y_hat = y_hat$y)
 
+check <- train %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+check
+
+
+
+# Get predictions from test set
+y_hat_test <- predict(model_spline, x=test$review_count)
+test <- mutate(test, y_hat = y_hat_test$y)
+
+# plot
+fitted_model <- model_spline %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  rename(review_count = x, rating = y)
+predictions <- test %>% 
+  mutate(.fitted = y_hat)
+
+ggplot(NULL) +
+  geom_point(data=fitted_model, aes(x=review_count, y=rating), position = "jitter") +
+  geom_line(data=fitted_model, aes(x=review_count, y=.fitted), col="blue") +
+  geom_point(data=predictions, aes(x=review_count, y=.fitted), col="red") +
+  labs(x="Count of Reviews", y="Rating", title = "Spline Model predicting Rating")
 
 # Determine accuracy of model
+# used when determining the appropriate degrees of freedom for this model
 MSE <- mean((test$rating - test$y_hat)^2)
 
 test_result <- test %>%
@@ -331,12 +378,18 @@ set.seed(5)
 # Randomly divide the sample into training and test set
 train <- us_rest %>%
   sample_n(450)
+train$rating[c(21,26, 109, 154, 177, 227, 231, 308, 314)] <- "low"
+mutate(train, rating == as.factor(rating))
 
 test <- us_rest %>%
-  anti_join(train, by="phone")
+  anti_join(train, by="phone") 
+test$rating[8] <- "low"
+mutate(test, rating == as.factor(rating))
+
 
 # Fit the model
-model_formula <- as.formula("rating ~ review_count")
+model_formula <- 
+  as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude + city")
 tree_parameters <- rpart.control(maxdepth = 3)
 model_CART <- rpart(model_formula, data = train, control=tree_parameters)
 
@@ -347,8 +400,20 @@ text(model_CART, use.n = TRUE)
 title("Predicting Rating using Review Count")
 box()
 
+# compare the score of the training set with the test set
+p_hat_matrix <- model_CART %>% 
+  predict(type = "prob", newdata = train)
 
-# predictions are not working
+y_hat <- model_CART %>% 
+  predict(newdata=train, type="class")
+
+# Score/error
+MLmetrics::Accuracy(y_true = train$rating, y_pred = y_hat) # getting error because there are 5 levels in the the training set and only 4 levels in the test set
+MLmetrics::ConfusionMatrix(y_true = train$rating, y_pred = y_hat)
+
+
+
+# predictions on test set
 p_hat_matrix <- model_CART %>% 
   predict(type = "prob", newdata = test)
 
@@ -356,8 +421,8 @@ y_hat <- model_CART %>%
   predict(newdata=test, type="class")
 
 # Score/error
-MLmetrics::Accuracy(y_true = iris$Species, y_pred = y_hat)
-MLmetrics::ConfusionMatrix(y_true = iris$Species, y_pred = y_hat)
+MLmetrics::Accuracy(y_true = test$rating, y_pred = y_hat) # getting error because there are 5 levels in the the training set and only 4 levels in the test set
+MLmetrics::ConfusionMatrix(y_true = test$rating, y_pred = y_hat)
 ```
 
 

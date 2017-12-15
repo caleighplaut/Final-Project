@@ -1,5 +1,5 @@
 ---
-title: "Final Project"
+title: "Write-up for Final Project"
 author: "Meredith Manley and Caleigh Plaut"
 date: "11/16/17"
 output: 
@@ -13,28 +13,25 @@ output:
     fig_height: 3
     fig_width: 5
 ---
+# Abstract
+Our project utilizes the Yelp Fusion API to identify variables that have a meaningful relationship with Yelp rating and incorporate them into a predictive model in the hope of forecasting Yelp rating given a specific restaurant. We narrowed the observations to restaurants in the top ten cities in the United States and further reduced our observations by randomly selecting 50 restaurants from each of these cities, leaving us with 500 observations to work with in total – 450 observations in our training set and 50 observations in our test set. We focused on the relationship between the following variables during our explanatory analysis: distance from the city center and rating, price and rating, and review count and rating. We found that the variable “review count” had a significant correlation with rating and thus would expect that it should be somewhat predictive of “rating.” We decided to use all variables in our initial multivariate linear regression model. Through stepwise linear regression we developed a univariate spline model dependent on “review count” and then again incorporated all variables for our classification algorithm CART model. We found that the spline model performed better than the multivariate linear regression model and that our CART model was correct ___% of the time. 
 
-```{r, setup, include=FALSE}
-require(mosaic)   # Load additional packages here 
-
-# Some customization.  You can alter or delete as desired (if you know what you are doing).
-trellis.par.set(theme=theme.mosaic()) # change default color scheme for lattice
-knitr::opts_chunk$set(
-  tidy=FALSE,     # display code as typed
-  size="small")   # slightly smaller font for code
-```
+# Introduction
+ 
 
 
 
-# Data Collection
+# Data
+## Load the Data
 ```{r}
 # Load the necessary packages
 library(tidyverse)
 library(httr)
 library(yelpr)
 library(glmnet)
-library(dplyr)
+library(MASS)
 library(ggplot2)
+library(rpart)
 library(ggmap)
 
 # Code provided by Alex to obtain data from Yelp API
@@ -82,138 +79,104 @@ us_rest$latitude <- as.numeric(us_rest$latitude)
 us_rest$longitude <- as.numeric(us_rest$longitude)
 
 # Change `price` from character to ordinal variable
-us_rest2 <- us_rest
+us_rest <- mutate(us_rest, price_2 = rep(0))
 
-for (i in length(us_rest2)) {
-  
-  if(us_rest2$price[i] == "$") {
-        us_rest2$price[i] == 1
-  } else if (us_rest2$price[i] == "$$") {
-    us_rest2$price[i] == 2
-  } else if (us_rest2$price[i] == "$$$") {
-    us_rest2$price[i] == 3
-  } else if (us_rest2$price[i] == "$$$$") {
-    us_rest2$price[i] == 4
-  } else
-    us_rest2$price[i] == 5
+values <- ifelse(us_rest$price == "$", 1, 
+       ifelse(us_rest$price == "$$", 2, 
+              ifelse(us_rest$price == "$$$", 3, 
+                     ifelse(us_rest$price == "$$$$", 4, 5))))
 
-}
-
-if(us_rest2$price == "$") {
-        us_rest2$price == 1
-  } else if (us_rest2$price == "$$") {
-    us_rest2$price == 2
-  } else if (us_rest2$price == "$$$") {
-    us_rest2$price == 3
-  } else if (us_rest2$price == "$$$$") {
-    us_rest2$price == 4
-  } else
-    us_rest2$price == 5
+us_rest <- mutate(us_rest, price_2 = values)
 
 # Change `is_closed` from a logical variable to an indicator variable
+# where 1 indicated that the restaurant is open and 0 closed
+us_rest <- mutate(us_rest, is_open = rep(0))
 
+values <- ifelse(us_rest$is_closed == "FALSE", 1, 0)
+
+us_rest <- mutate(us_rest, is_open = values)
+    
 # Store test results for each model
 test_results <- as.data.frame(c())
 
 ```
 
 
-# Exploratory Analysis
+## Exploratory Analysis
+#### Map of 10 Largest Cities in the US
 ```{r}
-# trying to predict the rating
-qmplot(longitude, latitude, data = us_rest2, colour = I('red'), size = I(3), darken = .3, fullpage=TRUE)
- 
+qmplot(longitude, latitude, data = us_rest, colour = I('red'), size = I(3), darken = .3, zoom = 5)
+``` 
 
-us_rest2 %>%
+> 
+
+
+
+#### Distribution of Outcome Variable  - `rating`
+```{r}
+us_rest %>%
   filter(rating>=3.5) %>%
-    ggplot(aes(x=rating))+geom_histogram(stat="bin", binwidth=.5)
-
-us_rest2 %>%
-  filter(!is.na(city))%>%
-  group_by(city) %>%
-    summarise(avg_rating=mean(rating))%>%
-      arrange(avg_rating) %>%
-        ggplot(aes(x=city, y=avg_rating))+geom_point()
-
-
-summary(us_rest2$rating)
-
-
-# what is the average rating of a restaurant grouped by city and price? group by city and review count? other ways to group variables to look at their impact on rating? include a visualization?
-
-# descriptive statistics of the response variable `rating`. include a visualization?
-
-
-
+    ggplot(aes(x=rating))+geom_histogram(stat="bin", binwidth=.5) + 
+    labs(title = "Count of US Restaurants by Respective Rating")
 ```
 
+> As you can see, most resutrants got a rating of 4.0, which is high since the ratings are 1-5. All restaurant ratings are somewhat bias upwards, so finding one under 4.0 is fairly rare. Also, finding a resutrant with a rating of 5.0 is rare.  Shows the distribution of our outcome variable, which given the limited range of ratings, appears to be fairly normal. Looking at this plot is important because had it been significantly skewed to the right or to the left we may have needed to include some kind of transformation before we began developing our models.
 
 
-# Modeling
-### Model 1: Simple Linear Regression
+#### Association Between `distance` and `rating`
 ```{r}
+us_rest %>%
+        ggplot(aes(x=distance, y=rating)) + geom_point() +
+        labs(title = "Association Between Distance and Rating")
+```
+
+> The distance variable refers to how far away a given restaurant is from the city that was searched measured in meters regardless of what metric system the desired city uses. One hypothesis that we had was that restaurants that are further from the city center would have a lower rating because they do not experience as much traffic as those downtown and thus may not have as many reviews or customers to rate their experience. From this plot we can see that is it hard to determine if that is true or not.  However, we can see that those restaurants that received the highest rating of 5.0 were all  within approximately 8,000 meters or 5 miles from the searched city and those cities that were furthest away from the searched city received lower ratings of 4.0. This observations are not conclusive in terms of predictability especially given that the correlation between distance and rating is close to zero (-0.007929708), but provide some evidence that we should include this variable in our model development.
+
+
+#### Association Between `review_count` and `rating` Relative to `price`
+```{r}
+us_rest %>%
+  filter(!is.na(city))%>%
+        ggplot(aes(x=review_count, y=rating, color = price_2)) + geom_point(position = "jitter", alpha = 0.4) + labs(title = "Assocation between Review Count and Rating", x = "review count") #+ geom_smooth() 
+cor(us_rest$review_count, us_rest$rating)
+```
+
+> In this plot we see review count on the x axis and restaurant rating on the y-axis with color indicating the price. This scatterplot differs from the previous plot of the relationship between rating and distance because we have used the jitter feature within the ggplot package so that we can more easily see the different price value for each unique observation. However it does not appear that price varies however remains constant across the plot, so from this graphic it does not appear that price would have a predictive effect on rating. On the other hand, review_count has a moderately strong negative correlation of -0.2554035 with rating and thus we would cautiously say that as review count increases the rating of a given establishment seems to decrease. Given this analysis it would also be beneficial to include this variable in the model development.
+
+# Results
+
+
+# Diagnostics
+### Continuous Outcome Variable
+
+#### Model 1: Multiple Linear Regression
+```{r}
+set.seed(1)
 # Randomly divide the sample into training and test set
 train <- us_rest %>%
   sample_n(450)
 
 test <- us_rest %>%
   anti_join(train, by="phone")
-# Matched by unique phone numbers, but needed to include the one location 
-# that does not have a phone number.
-test <- rbind(test, us_rest[1,])
-
-# Variable selection (???)
 
 # Fit the model
-model_formula <- as.formula("rating ~ review_count")
-model_lm <- lm(model_formula, data=train)
-# Get predictions from test set
-y_hat <- predict(model_lm, newdata=test)
-test <- mutate(test, y_hat = y_hat)
-# Save fitted model and predictions 
-fitted_model <- model_lm %>% 
-  broom::augment() %>% 
-  as_tibble()
-predictions <- model_lm %>% 
-  broom::augment(newdata=test)
-# Plot 
-ggplot(NULL) +
-  geom_point(data=fitted_model, aes(x=review_count, y=rating)) +
-  geom_line(data=fitted_model, aes(x=review_count, y=.fitted), col="blue") +
-  geom_point(data=predictions, aes(x=review_count, y=.fitted), col="red") +
-  labs(x="Number of Yelp Reviews", y="Rating") + 
-  geom_jitter(data=fitted_model, aes(x=review_count, y=rating))
+model_formula <- 
+  as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude")
+model_mlm <- lm(model_formula, data=train)
+
+# calculate train MSE for comparison
+y_hat <- predict(model_mlm, newdata=train)
+train <- mutate(train, y_hat = y_hat)
+
 
 # Determine accuracy of model
-test_result <- test %>%
+check <- train %>%
   summarise(MAE = sum(abs(y_hat - rating))/n(),
             MSE = sum((y_hat - rating)^2)/n(),
             SSE = sum((y_hat - rating)^2))
-test_result 
-test_results <- rbind(test_results, test_result)
-
-```
-
-> Discussion: 
+check
 
 
-### Model 2: Multiple Linear Regression
-```{r}
-# Randomly divide the sample into training and test set
-train <- us_rest %>%
-  sample_n(450)
-
-test <- us_rest %>%
-  anti_join(train, by="phone")
-# Matched by unique phone numbers, but needed to include the one location 
-# that does not have a phone number.
-test <- rbind(test, us_rest[1,])
-
-# Variable selection (???)
-
-# Fit the model
-model_formula <- as.formula("rating ~ review_count + distance")
-model_mlm <- lm(model_formula, data=train)
 # Get predictions from test set
 y_hat <- predict(model_mlm, newdata=test)
 test <- mutate(test, y_hat = y_hat)
@@ -227,36 +190,62 @@ test_result <- test %>%
 test_result 
 test_results <- rbind(test_results, test_result)
 
+# Variable selection with Stepwise Regression
+step <- stepAIC(model_mlm, direction="both")
+step$anova # display results
 ```
 
-> Discussion:
+> Discussion: We decided to start off looking at a model that includes all numeric variables in the training set and compute an initial MSE value from the test set which we can compare with other models. Based on our results we then ran a stepwise regression to determine which model would be the best fit for the data. It turns out that the most accurate linear model only includes `review_count` as a predictor variable, so we will explore the simple linear regression model using `review_count` to predict `rating.` 
 
 
-
-### Model 3: Spline
+#### Model 2: Spline
 ```{r}
+set.seed(3)
 # Randomly divide the sample into training and test set
 train <- us_rest %>%
   sample_n(450)
 
 test <- us_rest %>%
   anti_join(train, by="phone")
-# Matched by unique phone numbers, but needed to include the one location 
-# that does not have a phone number.
-test <- rbind(test, us_rest[1,])
-
-# Variable selection (???)
 
 # Fit the model
-model_spline <- smooth.spline(x=train$review_count, y=train$rating, df = 4) 
+model_spline <- smooth.spline(x=train$review_count, y=train$rating, df=10) 
 # play around with degrees of freedom
 
-# Get predictions from test set
-y_hat <- predict(model_spline, x=test$review_count)
-test <- mutate(test, y_hat = y_hat$y)
+# Calculate train MSE for comparison
+y_hat <- predict(model_spline, x=train$review_count)
+train <- mutate(train, y_hat = y_hat$y)
 
+check <- train %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+check
+
+
+
+# Get predictions from test set
+y_hat_test <- predict(model_spline, x=test$review_count)
+test <- mutate(test, y_hat = y_hat_test$y)
+
+# plot
+fitted_model <- model_spline %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  rename(review_count = x, rating = y)
+predictions <- test %>% 
+  mutate(.fitted = y_hat)
+
+ggplot(NULL) +
+  geom_point(data=fitted_model, aes(x=review_count, y=rating), position = "jitter") +
+  geom_line(data=fitted_model, aes(x=review_count, y=.fitted), col="blue") +
+  geom_point(data=predictions, aes(x=review_count, y=.fitted), col="red") +
+  labs(x="Count of Reviews", y="Rating", title = "Spline Model predicting Rating")
 
 # Determine accuracy of model
+# used when determining the appropriate degrees of freedom for this model
+MSE <- mean((test$rating - test$y_hat)^2)
+
 test_result <- test %>%
   summarise(MAE = sum(abs(y_hat - rating))/n(),
             MSE = sum((y_hat - rating)^2)/n(),
@@ -265,73 +254,65 @@ test_result
 test_results <- rbind(test_results, test_result)
 ```
 
-> Discussion:
+> Discussion: Explain what is a spline model. Used df=10 because... Does not have a lower MSE value compared to the simple linear regression model
 
-### Model 4: LASSO
+
+### Categorical Outcome Variable with > 2 levels
+#### Model 3: CART
 ```{r}
+set.seed(5)
 # Randomly divide the sample into training and test set
 train <- us_rest %>%
   sample_n(450)
 
-test <- us_rest %>%
-  anti_join(train, by="phone")
-# Matched by unique phone numbers, but needed to include the one location 
-# that does not have a phone number.
-test <- rbind(test, us_rest[1,])
+train$rating[c(21,26, 109, 154, 177, 227, 231, 308, 314)] <- "low"
+mutate(train, rating == as.factor(rating))
 
-get_LASSO_coefficients <- function(LASSO_fit){
-  coeff_values <- LASSO_fit %>% 
-    broom::tidy() %>% 
-    as_tibble() %>% 
-    select(-c(step, dev.ratio)) %>% 
-    tidyr::complete(lambda, nesting(term), fill = list(estimate = 0)) %>% 
-    arrange(desc(lambda)) %>% 
-    select(term, estimate, lambda)
-  return(coeff_values)
-}
+test <- us_rest %>%
+  anti_join(train, by="phone") 
+test$rating[8] <- "low"
+mutate(test, rating == as.factor(rating))
+
 
 # Fit the model
-model_formula <- as.formula("rating ~ review_count + distance")
-predictor_matrix <- model.matrix(model_formula, data = train)[, -1]
+model_formula <- 
+  as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude + city")
+tree_parameters <- rpart.control(maxdepth = 3)
+model_CART <- rpart(model_formula, data = train, control=tree_parameters)
 
-lambda_inputs <- 10^seq(-2, 10, length = 100)
 
-LASSO_fit <- glmnet(x=predictor_matrix, y=train$rating, alpha = 1, lambda = lambda_inputs)
+# Tree Diagram
+plot(model_CART, margin=0.25)
+text(model_CART, use.n = TRUE)
+title("Predicting Rating using Review Count")
+box()
 
-# Get coefficients
-LASSO_coefficients <- get_LASSO_coefficients(LASSO_fit)
+# compare the score of the training set with the test set
+p_hat_matrix <- model_CART %>% 
+  predict(type = "prob", newdata = train)
 
-plot_LASSO_coefficients <- LASSO_coefficients %>% 
-  filter(term != "(Intercept)") %>% 
-  ggplot(aes(x=lambda, y=estimate, col=term)) +
-  geom_line() +
-  scale_x_log10() +
-  labs(x="lambda (log10-scale)", y="beta-hat coefficient estimate",
-       title="LASSO regularized coefficient for each lambda value")
-plot_LASSO_coefficients
+y_hat <- model_CART %>% 
+  predict(newdata=train, type="class")
 
-LASSO_CV <- cv.glmnet(x=predictor_matrix, y=train$rating, alpha=1, lambda=lambda_inputs)
+# Score/error
+MLmetrics::Accuracy(y_true = train$rating, y_pred = y_hat) # getting error because there are 5 levels in the the training set and only 4 levels in the test set
+MLmetrics::ConfusionMatrix(y_true = train$rating, y_pred = y_hat)
 
-# Optimal lambdas
-lambda_star <- LASSO_CV$lambda.min
-lambda_star_1SE <- LASSO_CV$lambda.1se
 
-plot_LASSO_coefficients <- plot_LASSO_coefficients +
-  geom_vline(xintercept = lambda_star, col="red", alpha=0.4, linetype="dashed") +
-  geom_vline(xintercept = lambda_star_1SE, col="blue", alpha=0.4, linetype="dashed")
-plot_LASSO_coefficients
 
-y_hat <- predict(LASSO_fit, newx=predictor_matrix, s=lambda_star_1SE) %>% 
-  as.vector()
-mean(y_hat)
+# predictions on test set
+p_hat_matrix <- model_CART %>% 
+  predict(type = "prob", newdata = test)
+
+y_hat <- model_CART %>% 
+  predict(newdata=test, type="class")
+
+# Score/error
+MLmetrics::Accuracy(y_true = test$rating, y_pred = y_hat) 
+MLmetrics::ConfusionMatrix(y_true = test$rating, y_pred = y_hat)
 ```
 
 
-# Extension
-> test on a smaller city (out-of-sample prediction) and see if the best model still does well on a different area. If not, speculate as to why this might be the case.
+# Conclusion
 
 
-# Questions
-> Change `price` to an ordinal categorical variable
-> Change `is_closed` to a binary variable
-> Should we treat `rating` as a continous variable or categorical variable

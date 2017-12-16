@@ -1,0 +1,92 @@
+---
+title: "Load Data from API"
+author: ""
+date: ""
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  pdf_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, setup, include=FALSE}
+require(mosaic)   # Load additional packages here 
+
+# Some customization.  You can alter or delete as desired (if you know what you are doing).
+trellis.par.set(theme=theme.mosaic()) # change default color scheme for lattice
+knitr::opts_chunk$set(
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+```
+
+
+# Create Tidy Dataset
+```{r}
+# Code provided by Alex to obtain data from Yelp API
+devtools::install_github("jennybc/ryelp")
+res <- POST("https://api.yelp.com/oauth2/token",
+            body = list(grant_type = "client_credentials",
+                        client_id = "t5Vxmm0MO0Cb6FV6y7RfOg",
+                        client_secret = "CnukNBSKQMF1CNNk9BGX8H1ZCj4JwYdRnZmiaZkBbelBHD8Q9lZhZTaGuyAahZqS"))
+token <- content(res)$access_token
+
+# Looking at restaurants in the top 10 largest cities in the US
+yelp <- "https://api.yelp.com"
+term <- "restaurant"
+location <- c("New York City, NY", "Los Angeles, CA", "Chicago, IL", "Houston,TX", "Philadelphia, PA",
+              "Phoenix, AZ", "San Antonio, TX", "San Diego, CA", "Dallas, TX", "San Jose, CA")
+us_rest <- as.data.frame(c())
+
+for (i in 1:length(location)) {
+  limit <- 50
+  (url <-
+      modify_url(yelp, path = c("v3", "businesses", "search"),
+                 query = list(term = term, location = location[i], limit = limit)))
+  
+  res <- GET(url, add_headers('Authorization' = paste("bearer", token)))
+  http_status(res)
+  
+  ct <- content(res)
+  tmp <- ct$businesses %>%
+    map_df(`[`, c("name", "phone", "is_closed", "rating", "distance", "review_count")) %>%
+    mutate(price = ct$businesses[[1]][11], city = ct$businesses[[1]][[12]][4], 
+           state = ct$businesses[[1]][[12]][7], zipcode = ct$businesses[[1]][[12]][5], 
+           latitude = ct$businesses[[1]][[9]][1], longitude = ct$businesses[[1]][[9]][2]) 
+  # `price`, `city`, `state`, `zipcode`, `latitude`, `longitude` were lists within a list 
+  # so we need to extract that separately.
+  
+  us_rest <- rbind(us_rest, tmp)
+}
+
+# Convert character lists to just characters and numeric lists to just numerical values
+us_rest$price <- as.character(us_rest$price)
+us_rest$city <- as.character(us_rest$city)
+us_rest$state <- as.character(us_rest$state)
+us_rest$zipcode <- as.character(us_rest$zipcode)
+us_rest$latitude <- as.numeric(us_rest$latitude)
+us_rest$longitude <- as.numeric(us_rest$longitude)
+
+# Change `price` from character to ordinal variable
+us_rest <- mutate(us_rest, price_2 = rep(0))
+
+values <- ifelse(us_rest$price == "$", 1, 
+       ifelse(us_rest$price == "$$", 2, 
+              ifelse(us_rest$price == "$$$", 3, 
+                     ifelse(us_rest$price == "$$$$", 4, 5))))
+
+us_rest <- mutate(us_rest, price_2 = values)
+
+# Change `is_closed` from a logical variable to an indicator variable
+# where 1 indicated that the restaurant is open and 0 closed
+us_rest <- mutate(us_rest, is_open = rep(0))
+
+values <- ifelse(us_rest$is_closed == "FALSE", 1, 0)
+
+us_rest <- mutate(us_rest, is_open = values)
+write.csv(us_rest, "us_rest.csv")
+```

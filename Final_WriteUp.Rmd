@@ -1,0 +1,451 @@
+---
+title: "Write-up: Yelp Restaurant Rating Model"
+author: "Meredith Manley and Caleigh Plaut"
+date: "12/18/17"
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  pdf_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+# Load the necessary packages
+require(mosaic)
+library(tidyverse)
+library(httr)
+library(yelpr)
+library(glmnet)
+library(MASS)
+library(ggplot2)
+library(rpart)
+library(ggmap)
+
+# Load the data
+us_rest <- read_csv("us_rest.csv")
+
+# Store test results for each model
+test_results <- as.data.frame(c())
+
+```
+
+
+
+# Abstract
+Our project utilizes the Yelp Fusion API to identify variables that have a meaningful relationship with Yelp rating and incorporate them into a predictive model in the hope of forecasting Yelp rating for a specific restaurant. We narrowed the observations to restaurants in the top ten cities in the United States and further reduced our observations by randomly selecting 50 restaurants from each of these cities, leaving us with 500 observations to work with in total – 450 observations in our training set and 50 observations in our test set. We focused on the relationship between the following variables during our explanatory analysis: distance from the city center and `rating`, `price` and `rating`, and `review_count` and `rating`. We found that the variable `review_count` had a significant correlation with `rating` and thus would expect that it should be somewhat predictive when included in a model. We decided to treat `rating` as a numerical outcome as well as a categorical outcome for different types of models. We implemented a multivariate linear regression and a univariate spline model on `rating` as a numerical value and then a classification and regression tree (CART) model on `rating` as a categorical variable. Although it is difficult to compare the accuracy of a model predicting a numerical outcome versus a categorical outcome, we determined that both methods perform relatively well.  
+
+# Introduction
+  As frequent Yelp users, we wanted to determine what factors influence the Yelp ratings of restaurants. Typically, the first thing that we look at when going on Yelp is the overall star rating of a restaurant; a rating of one star means that the restaurant should probably be avoided, while a rating of five stars means that the restaurant has clearly achieved success. However, we have both eaten at restaurants whose rating does not do it justice or gives it too much credit. Considering that Yelp reviews and ratings are created by a mélange of serious food critics, everyday foodies and individuals, who held a grudge against their waiter, we wanted to look behind the façade of the star rating and see what confounding factors may influence restaurant ratings other than customer satisfaction and service quality. 
+In our exploratory analysis, we identified variables in the Yelp API that could potentially be useful in creating a predictive model. While we find that there is no notable relationship between `distance` and `rating` as seen in Figure 1 nor is there one between `price` and `rating`, we do discover a moderately strong negative correlation of -0.2738796 between `review_count` and `rating` from Figure 2. Thus, we can cautiously say that an increase in review count for a given restaurant on Yelp is associated with a decrease in the rating of that establishment and we would anticipate that review count will be significant in our models of Yelp rating. 
+  
+#### Figure 1: Association Between `distance` and `rating`
+```{r, echo=FALSE}
+# plot
+us_rest %>%
+        ggplot(aes(x=distance, y=rating)) + geom_point() +
+        labs(title = "Association Between Distance and Rating")
+```
+
+
+#### Figure 2: Association Between `review_count` and `rating` Relative to `price`
+```{r, echo=FALSE}
+# plot
+us_rest %>%
+  filter(!is.na(city))%>%
+        ggplot(aes(x=review_count, y=rating, color = price_2)) + geom_point(position = "jitter", alpha = 0.4) + labs(title = "Assocation between Review Count and Rating", x = "review count") #+ geom_smooth() 
+
+# correlation
+cor(us_rest$review_count, us_rest$rating)
+```
+  
+
+Our exploratory analysis also looks at the distribution of the Yelp rating below in Figure 3. Given the limited range of ratings, the distribution looks fairly normal. Had the data been significantly skewed to the left or right, we may have needed to include some kind of transformation to the Yelp rating variable before developing our predictive models. 
+
+
+	
+#### Figure 3: Distribution of Outcome Variable  - `rating`
+```{r, echo=FALSE}
+# plot
+us_rest %>%
+  filter(rating>=3.5) %>%
+    ggplot(aes(x=rating))+geom_histogram(stat="bin", binwidth=.5) + 
+    labs(title = "Count of US Restaurants by Respective Rating")
+```
+	
+  When developing a predictive model for Yelp ratings we wanted to experiment with multiple methods and compare their results to ultimately determine which model is most accurate for this specific outcome variable. We initially treated `rating` as a numerical value and trained a multivariate linear regression model dependent on all variables in our dataset: `review_count`, `distance`, `is_open`, `price_2`, `latitude`, and `longitude`. We calculated the Means Squared Error (MSE) on the train set and the test set. The MSE from the train set will act as more of a check for overfitting and the MSE from the test set will measure the models accuracy. In both of our models which predict `rating` as a numeric outcome there was not much evidence of overfitting as the MSE from our test set lower than that of our training set.
+	Next, we performed a stepwise regression to trim our model of any variables that may not contribute significantly to our model. Based on these results and the fact that during our development process we had not saved one dataset, but rather trained our models on new data each time, we ran a univariate spline model which was dependent on only one predictor from our dataset, `review_count`. This confirms our findings from the exploratory analysis, in that `review_count` is predictive of a given Yelp rating. We calculated the MSE for the train and test, again, to check for overfitting and strength of model.
+	Lastly, we converted `rating` into a categorical variable and trained a CART model. One issue that we ran into was that `rating` contained more levels (5) in the training set than it had in the test set (3). Being that there were only 6 restaurants in our training set that had a rating below 4.0 we decided that for simplicity’s sake, we will remove these observations and proceed with a training set of 444 observations. While we cannot calculate a MSE for classification algorithm we determined our accuracy percentage.
+
+
+# Data
+  The data is from the Yelp Fusion API. This API provides access to information for reviewed businesses on Yelp. We extracted observations from restaurants in the top ten largest cities in the United States using a for-loop and code found online that was provided by Prof. Alex Baldenko. These cities are in various different regions of the United States as seen in the map below in Figure 4, so we are somewhat able to account for variations in Yelp ratings due to regional difference. We pulled 50 observations from each city as the API limits how many observations you can pull at one time. Our sample size was composed of 500 observations—450 of these observations would be included in the train set and 50 would be included in the test set. 
+  
+#### Figure 4: Map of 10 Largest Cities in the US
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+qmplot(longitude, latitude, data = us_rest, colour = I('red'), size = I(3), darken = .3, zoom = 5)
+``` 
+
+  The response variable in our models is called `rating` in the Yelp API and indicates the rating of a given business according to Yelp. It is a discrete variable and has the type decimal—its possible values are 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5 and 5. Thus, there is a tight range of values that the models can predict for rating. We used the numeric variable `review_count` as a predictor in all our models. `review_count` refers to the number of reviews for a given business and has type int. Geographic variables, such as `distance` (refers to the distance in meters from the search location), `latitude` (of a given business) and `longitude` (of a given business), have the type decimal and are included in our first model, multivariate linear regression model, and last model, classification algorithm. 
+  We transformed the categorical variable `price`, which refers to how expensive, or inexpensive, a given establishment is. Because the price level is represented as dollar signs on Yelp—one dollar sign represents the least expensively priced restaurants and four dollar signs represent the most expensively priced restaurants – this would not have contributed to our model. We converted `price` into an ordinal variable by substituting a “1” where there was one dollar sign, a “2” where there was two dollar signs, so on and so forth to preserve the categorical nature of this variable. We also transformed the variable `is_closed`, a Boolean variable that is true when a restaurant is permanently closed and false otherwise, to a variable that is true when a restaurant is not permanently closed, which we name `is_open`. 
+
+#### Sample of Data
+```{r, echo=FALSE}
+head(us_rest)
+```
+
+# Results
+
+We constructed three models on the scraped data to predict a Yelp rating on a given restaurant: multivariate linear regression model, univariate spline model, classification and regression tree model. In the first two models, `rating` is a numeric variable whereas in the classification algorithm, CART, `rating` is an ordinal categorical variable.  
+
+### Discrete Numerical Outcome Variable
+### Model 1: Multiple Linear Regression
+```{r, echo=FALSE, message=FALSE, warning =FALSE}
+set.seed(1)
+# Randomly divide the sample into training and test set
+train <- us_rest %>%
+  sample_n(450)
+
+test <- us_rest %>%
+  anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
+
+# Fit the model
+model_formula <- 
+  as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude")
+model_mlm <- lm(model_formula, data=train)
+
+# calculate train MSE for comparison
+y_hat <- predict(model_mlm, newdata=train)
+train <- mutate(train, y_hat = y_hat)
+
+
+# Determine accuracy of model
+check <- train %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+
+
+# Get predictions from test set
+y_hat <- predict(model_mlm, newdata=test)
+test <- mutate(test, y_hat = y_hat)
+
+
+# Determine accuracy of model
+test_result <- test %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+test_results <- rbind(test_results, test_result)
+```
+
+We obtained the following multivariate linear regression model from our training data:
+$$\hat{rating} = \hat{\beta_0} + \hat{\beta_1}*reviewcount + \hat{\beta_2}*distance + \hat{\beta_3}*isopen + \hat{\beta_4}*price2 + \hat{\beta_5}*latitude + \hat{\beta_6}*longitude$$
+#### Summary of Model 1
+```{r, messages=FALSE, warning=FALSE}
+summary(model_mlm)
+```
+
+From the result above we see that, for example, the coefficient associated with `review_count` indicates that when all other variables are held constant as we increase `review_count` by 1 `rating` decreases by 5.875e-05 as the coefficient is -5.875e-05. The same can be said for every other variable included in this model. Additionally, when we look at the p-values for each value we see that `review_count` is the only significant variable in this model, thus by the negative coefficient and its significance, this confirms our hypothesis from the exploratory analysis that `review_count` would be an effective predictor of `rating`.
+
+#### Model 2: Spline
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+set.seed(1)
+# Randomly divide the sample into training and test set
+train <- us_rest %>%
+  sample_n(450)
+
+test <- us_rest %>%
+  anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
+
+# Fit the model
+model_spline <- smooth.spline(x=train$review_count, y=train$rating, df=10) 
+# play around with degrees of freedom
+
+# Calculate train MSE for comparison
+y_hat <- predict(model_spline, x=train$review_count)
+train <- mutate(train, y_hat = y_hat$y)
+
+check <- train %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+
+
+# Get predictions from test set
+y_hat_test <- predict(model_spline, x=test$review_count)
+test <- mutate(test, y_hat = y_hat_test$y)
+
+
+MSE <- mean((test$rating - test$y_hat)^2) # command used in forloop when 
+# determining the appropriate degrees of freedom for this model in line 184
+# through crossvalidation
+
+test_result <- test %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+test_results <- rbind(test_results, test_result)
+```
+
+We then developed a spline model based on the single predictor, `review_count` to predict `rating`. We arrived at this model by performing a cross validation on the model to determine the appropriate value for the degrees of freedom and concluded that when df=10 then this is when the MSE is the lowest for the model. With this trained model we found that overall this model was not overfit to the training set because the MSE from the training set was higher (0.08425069) than the MSE from the test set which was reported to be 0.06104747. Comparing this test MSE to the test MSE from the multivariate linear regression model we see that this MSE is lower and, therefore, does a better job predicting `rating`.
+
+
+### Categorical Outcome Variable with > 2 levels
+#### Model 3: CART
+```{r, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
+set.seed(1)
+# Randomly divide the sample into training and test set
+train <- us_rest %>%
+  sample_n(450)
+
+test <- us_rest %>%
+  anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
+test$rating <- as.character(test$rating)
+
+# because the test set does not possess any `rating` observations that are below
+# 4.0 and there are only 6 observations that are below 4.0 in the training set then
+# we will get ride of these few observations and proceed for the classification
+# algorithm
+train <- train[-(c(56, 108, 181, 220, 270, 380)), ]
+train$rating <- as.character(train$rating)
+
+
+# Fit the model
+model_formula <- 
+  as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude + city")
+tree_parameters <- rpart.control(maxdepth = 3)
+model_CART <- rpart(model_formula, data = train, control=tree_parameters)
+
+# compare the score of the training set with the test set
+p_hat_matrix <- model_CART %>% 
+  predict(type = "prob", newdata = train)
+
+y_hat <- model_CART %>% 
+  predict(newdata=train, type="class")
+
+# Score/error
+MLmetrics::Accuracy(y_true = train$rating, y_pred = y_hat) 
+MLmetrics::ConfusionMatrix(y_true = train$rating, y_pred = y_hat)
+
+
+# predictions on test set
+p_hat_matrix <- model_CART %>% 
+  predict(type = "prob", newdata = test)
+
+y_hat <- model_CART %>% 
+  predict(newdata=test, type="class") %>%
+  as.character() 
+test <- mutate(test, y_hat = y_hat)
+
+# Percentage of correct ratings
+MLmetrics::Accuracy(y_true = test$rating, y_pred = y_hat) 
+```
+
+
+The last technique we wanted to implement was a classification algorithm. For this model we treated `rating` as an ordinal categorical variable with 5 levels (3.0, 3.5, 4.0, 4.5, and 5.0) as opposed to a numeric variable as was the case for the multivariate linear regression model and the spline model. Since we cannot calculate an MSE value for this model we calculated the percentage of times that this model predicted the rating accurately. 64% of the time our classification algorithm correctly predicted the rating of a particular model.
+
+In conclusion, we see that the univariate spline model dependent on the predictor `review_count` performs better than the multivariate linear regression model that utilizing all the available variables in the dataset when `rating` is treated as a discrete numeric outcome. Their MSE values were 0.06104747 and 0.07471997, respectively. When we choose to develop a classification algorithm for `rating` as an ordinal categorical variable, we predict the correct Yelp rating 64% of the time.
+
+# Diagnostics
+
+### Discrete Numerical Outcome Variable
+### Model 1: Multiple Linear Regression
+```{r, echo=FALSE, message=FALSE, warning =FALSE}
+set.seed(1)
+# Randomly divide the sample into training and test set
+train <- us_rest %>%
+  sample_n(450)
+
+test <- us_rest %>%
+  anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
+
+# Fit the model
+model_formula <- 
+  as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude")
+model_mlm <- lm(model_formula, data=train)
+
+# calculate train MSE for comparison
+y_hat <- predict(model_mlm, newdata=train)
+train <- mutate(train, y_hat = y_hat)
+
+
+# Determine accuracy of model
+check <- train %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+
+
+# Get predictions from test set
+y_hat <- predict(model_mlm, newdata=test)
+test <- mutate(test, y_hat = y_hat)
+
+
+# Determine accuracy of model
+test_result <- test %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+test_results <- rbind(test_results, test_result)
+```
+
+Starting off with the multivariate linear regression method, we trained our model and then calculated a Means Squared Error (MSE) as a comparison to the MSE associated with the test set as a check for overfitting. The MSE that we obtained from the train set was 0.09515421 and the test set was 0.07471997, which indicates that our model did a better job predicting the values from our test set and, thus, we are no longer concerned about overfitting. Being that the Adjusted R-squared value is so low and the overall p-value for the model is so high, we can conclude that this is not the best model for this data and thus we will perform stepwise regression to trim our model of those variables that do not have a significant predictive ability for `rating`.
+
+
+#### Variable selection with Stepwise Regression
+```{r, messages=FALSE, warning=FALSE, echo=FALSE}
+step <- stepAIC(model_mlm, direction="both")
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+step$anova
+```
+
+The next step that we took in our model development was to perform a stepwise regression on our multivariate linear regression model for it's ability to select the best performing predictors. We see that the initial model is our original multivariate linear regression model and the final model is  trimmed version of our multivariate linear regression model which indicates that out of all of the variables that were included in the initial model, the only variables that contribute most to the prediction of `rating` are `review_count` and `price_2`. Because we have come across sufficient evidence that `review_count` is a strong predictor of `rating` we will drop `price_2` and create a univariate spline model with just `review_count` as our predictor.
+
+#### Model 2: Spline
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+set.seed(1)
+# Randomly divide the sample into training and test set
+train <- us_rest %>%
+  sample_n(450)
+
+test <- us_rest %>%
+  anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
+
+# Fit the model
+model_spline <- smooth.spline(x=train$review_count, y=train$rating, df=10) 
+# play around with degrees of freedom
+
+# Calculate train MSE for comparison
+y_hat <- predict(model_spline, x=train$review_count)
+train <- mutate(train, y_hat = y_hat$y)
+
+check <- train %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+
+
+# Get predictions from test set
+y_hat_test <- predict(model_spline, x=test$review_count)
+test <- mutate(test, y_hat = y_hat_test$y)
+
+
+MSE <- mean((test$rating - test$y_hat)^2) # command used in forloop when 
+# determining the appropriate degrees of freedom for this model in line 184
+# through crossvalidation
+
+test_result <- test %>%
+  summarise(MAE = sum(abs(y_hat - rating))/n(),
+            MSE = sum((y_hat - rating)^2)/n(),
+            SSE = sum((y_hat - rating)^2))
+test_results <- rbind(test_results, test_result)
+```
+
+
+We then developed a spline model based on the single predictor, `review_count` to predict `rating`. We arrived at this model by performing a cross validation on the model to determine the appropriate value for the degrees of freedom and concluded that when df=10 then this is when the MSE is the lowest for the model. With this trained model we found that overall this model was not overfit to the training set because the MSE from the training set was higher (0.08425069) than the MSE from the test set which was reported to be 0.06104747.
+
+
+#### Plot of Spline Model
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+fitted_model <- model_spline %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  rename(review_count = x, rating = y)
+predictions <- test %>% 
+  mutate(.fitted = y_hat)
+
+ggplot(NULL) +
+  geom_point(data=fitted_model, aes(x=review_count, y=rating), position = "jitter") +
+  geom_line(data=fitted_model, aes(x=review_count, y=.fitted), col="blue") +
+  geom_point(data=predictions, aes(x=review_count, y=.fitted), col="red") +
+  labs(x="Count of Reviews", y="Rating", title = "Spline Model predicting Rating")
+```
+
+In the plot above we see the spline model and it’s predictions imposed on the observations from the training set and how it appears to accurately predict the trend of the data.
+
+### Categorical Outcome Variable with > 2 levels
+#### Model 3: CART
+```{r, echo=FALSE, eval=FALSE, message=FALSE, warning=FALSE}
+set.seed(1)
+# Randomly divide the sample into training and test set
+train <- us_rest %>%
+  sample_n(450)
+
+test <- us_rest %>%
+  anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
+test$rating <- as.character(test$rating)
+
+# because the test set does not possess any `rating` observations that are below
+# 4.0 and there are only 6 observations that are below 4.0 in the training set then
+# we will get ride of these few observations and proceed for the classification
+# algorithm
+train <- train[-(c(56, 108, 181, 220, 270, 380)), ]
+train$rating <- as.character(train$rating)
+
+
+# Fit the model
+model_formula <- 
+  as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude + city")
+tree_parameters <- rpart.control(maxdepth = 3)
+model_CART <- rpart(model_formula, data = train, control=tree_parameters)
+
+# compare the score of the training set with the test set
+p_hat_matrix <- model_CART %>% 
+  predict(type = "prob", newdata = train)
+
+y_hat <- model_CART %>% 
+  predict(newdata=train, type="class")
+
+# Score/error
+MLmetrics::Accuracy(y_true = train$rating, y_pred = y_hat) 
+MLmetrics::ConfusionMatrix(y_true = train$rating, y_pred = y_hat)
+
+
+# predictions on test set
+p_hat_matrix <- model_CART %>% 
+  predict(type = "prob", newdata = test)
+
+y_hat <- model_CART %>% 
+  predict(newdata=test, type="class") %>%
+  as.character() 
+test <- mutate(test, y_hat = y_hat)
+
+# Percentage of correct ratings
+MLmetrics::Accuracy(y_true = test$rating, y_pred = y_hat) 
+```
+
+For this model we treated `rating` as an ordinal categorical variable with 5 levels (3.0, 3.5, 4.0, 4.5, and 5.0) as opposed to a numeric variable as was the case for the multivariate linear regression model and the spline model. Since we cannot calculate an MSE value for this model we calculated the percentage of times that this model predicted the rating accurately.
+
+
+# Conclusion
+We wanted to determine the underlying factors that impact Yelp rating other than the obvious ones, such as customer satisfaction and food quality. Ultimately, we determined that review count was highly predictive of rating. In fact, review count on its own in a univariate model performs better at predicting rating than the multivariate linear regression model that we created. Additionally, when we treat rating as a categorical variable for the classification algorithm our model performed significantly better than leaving it to chance.
+In terms of the direction of the relationship between these variables, we find that an increase in review count for a restaurant is associated with a decrease in rating for that same restaurant in the United States’ top ten cities. Furthermore, if we had two restaurants of similar quality, we would predict that the restaurant with more reviews on Yelp would have a better Yelp rating. 
+However, our data set and model did have limitations. The Yelp API was missing many variables that could have had an even better predictive value than review count, such as type of food or number of restaurants in the same area. If we could do this project again, we would merge the Yelp API data with another data set that has additional characteristics about the restaurants. In addition, we would extract more observations from the Yelp API to make the predictive models more accurate in their forecasting.  We did not know that we could surpass the limit of results per request, so we limited ourselves to 500 observations. Lastly, when developing our CART model we ran into the issue where there were levels of the rating variable that were observed in the training set, but not in the test set. Although there were only six of these observations that we removed from our dataset this still is something important we wanted to note.
+Given the strict timeline of this project, we were not able to explore this topic as deeply as we would have liked. If we had the opportunity to extend our analysis it would be interesting to see if our models could be highly predictive for restaurants in smaller cities in the United States, as well as cities outside the United States. In addition, we would like to explore other models that could better forecast Yelp ratings, such as other classification algorithms to compare how well our CART model performed, and include additional variables that incorporate restaurant characteristics into these models. 
+
+

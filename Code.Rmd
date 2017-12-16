@@ -1,7 +1,7 @@
 ---
-title: "Write-up for Final Project"
-author: "Meredith Manley and Caleigh Plaut"
-date: "11/16/17"
+title: "Code"
+author: "Caleigh Plaut and Meredith Manley"
+date: "12/18/17"
 output: 
   html_document:
     fig_height: 3
@@ -13,18 +13,11 @@ output:
     fig_height: 3
     fig_width: 5
 ---
-# Abstract
-Our project utilizes the Yelp Fusion API to identify variables that have a meaningful relationship with Yelp rating and incorporate them into a predictive model in the hope of forecasting Yelp rating given a specific restaurant. We narrowed the observations to restaurants in the top ten cities in the United States and further reduced our observations by randomly selecting 50 restaurants from each of these cities, leaving us with 500 observations to work with in total – 450 observations in our training set and 50 observations in our test set. We focused on the relationship between the following variables during our explanatory analysis: distance from the city center and rating, price and rating, and review count and rating. We found that the variable “review count” had a significant correlation with rating and thus would expect that it should be somewhat predictive of “rating.” We decided to use all variables in our initial multivariate linear regression model. Through stepwise linear regression we developed a univariate spline model dependent on “review count” and then again incorporated all variables for our classification algorithm CART model. We found that the spline model performed better than the multivariate linear regression model and that our CART model was correct ___% of the time. 
 
-# Introduction
- 
-
-
-
-# Data
 ## Load the Data
 ```{r}
 # Load the necessary packages
+require(mosaic)
 library(tidyverse)
 library(httr)
 library(yelpr)
@@ -34,67 +27,7 @@ library(ggplot2)
 library(rpart)
 library(ggmap)
 
-# Code provided by Alex to obtain data from Yelp API
-devtools::install_github("jennybc/ryelp")
-res <- POST("https://api.yelp.com/oauth2/token",
-            body = list(grant_type = "client_credentials",
-                        client_id = "t5Vxmm0MO0Cb6FV6y7RfOg",
-                        client_secret = "CnukNBSKQMF1CNNk9BGX8H1ZCj4JwYdRnZmiaZkBbelBHD8Q9lZhZTaGuyAahZqS"))
-token <- content(res)$access_token
-
-# Looking at restaurants in the top 10 largest cities in the US
-yelp <- "https://api.yelp.com"
-term <- "restaurant"
-location <- c("New York City, NY", "Los Angeles, CA", "Chicago, IL", "Houston,TX", "Philadelphia, PA",
-              "Phoenix, AZ", "San Antonio, TX", "San Diego, CA", "Dallas, TX", "San Jose, CA")
-us_rest <- as.data.frame(c())
-
-for (i in 1:length(location)) {
-  limit <- 50
-  (url <-
-      modify_url(yelp, path = c("v3", "businesses", "search"),
-                 query = list(term = term, location = location[i], limit = limit)))
-  
-  res <- GET(url, add_headers('Authorization' = paste("bearer", token)))
-  http_status(res)
-  
-  ct <- content(res)
-  tmp <- ct$businesses %>%
-    map_df(`[`, c("name", "phone", "is_closed", "rating", "distance", "review_count")) %>%
-    mutate(price = ct$businesses[[1]][11], city = ct$businesses[[1]][[12]][4], 
-           state = ct$businesses[[1]][[12]][7], zipcode = ct$businesses[[1]][[12]][5], 
-           latitude = ct$businesses[[1]][[9]][1], longitude = ct$businesses[[1]][[9]][2]) 
-  # `price`, `city`, `state`, `zipcode`, `latitude`, `longitude` were lists within a list 
-  # so we need to extract that separately.
-  
-  us_rest <- rbind(us_rest, tmp)
-}
-
-# Convert character lists to just characters and numeric lists to just numerical values
-us_rest$price <- as.character(us_rest$price)
-us_rest$city <- as.character(us_rest$city)
-us_rest$state <- as.character(us_rest$state)
-us_rest$zipcode <- as.character(us_rest$zipcode)
-us_rest$latitude <- as.numeric(us_rest$latitude)
-us_rest$longitude <- as.numeric(us_rest$longitude)
-
-# Change `price` from character to ordinal variable
-us_rest <- mutate(us_rest, price_2 = rep(0))
-
-values <- ifelse(us_rest$price == "$", 1, 
-       ifelse(us_rest$price == "$$", 2, 
-              ifelse(us_rest$price == "$$$", 3, 
-                     ifelse(us_rest$price == "$$$$", 4, 5))))
-
-us_rest <- mutate(us_rest, price_2 = values)
-
-# Change `is_closed` from a logical variable to an indicator variable
-# where 1 indicated that the restaurant is open and 0 closed
-us_rest <- mutate(us_rest, is_open = rep(0))
-
-values <- ifelse(us_rest$is_closed == "FALSE", 1, 0)
-
-us_rest <- mutate(us_rest, is_open = values)
+us_rest <- read_csv("us_rest.csv")
     
 # Store test results for each model
 test_results <- as.data.frame(c())
@@ -103,7 +36,7 @@ test_results <- as.data.frame(c())
 
 
 ## Exploratory Analysis
-#### Map of 10 Largest Cities in the US
+#### Figure 1: Map of 10 Largest Cities in the US
 ```{r}
 qmplot(longitude, latitude, data = us_rest, colour = I('red'), size = I(3), darken = .3, zoom = 5)
 ``` 
@@ -112,7 +45,7 @@ qmplot(longitude, latitude, data = us_rest, colour = I('red'), size = I(3), dark
 
 
 
-#### Distribution of Outcome Variable  - `rating`
+#### Figure 2: Distribution of Outcome Variable  - `rating`
 ```{r}
 us_rest %>%
   filter(rating>=3.5) %>%
@@ -123,7 +56,7 @@ us_rest %>%
 > As you can see, most resutrants got a rating of 4.0, which is high since the ratings are 1-5. All restaurant ratings are somewhat bias upwards, so finding one under 4.0 is fairly rare. Also, finding a resutrant with a rating of 5.0 is rare.  Shows the distribution of our outcome variable, which given the limited range of ratings, appears to be fairly normal. Looking at this plot is important because had it been significantly skewed to the right or to the left we may have needed to include some kind of transformation before we began developing our models.
 
 
-#### Association Between `distance` and `rating`
+#### Figure 3: Association Between `distance` and `rating`
 ```{r}
 us_rest %>%
         ggplot(aes(x=distance, y=rating)) + geom_point() +
@@ -133,7 +66,7 @@ us_rest %>%
 > The distance variable refers to how far away a given restaurant is from the city that was searched measured in meters regardless of what metric system the desired city uses. One hypothesis that we had was that restaurants that are further from the city center would have a lower rating because they do not experience as much traffic as those downtown and thus may not have as many reviews or customers to rate their experience. From this plot we can see that is it hard to determine if that is true or not.  However, we can see that those restaurants that received the highest rating of 5.0 were all  within approximately 8,000 meters or 5 miles from the searched city and those cities that were furthest away from the searched city received lower ratings of 4.0. This observations are not conclusive in terms of predictability especially given that the correlation between distance and rating is close to zero (-0.007929708), but provide some evidence that we should include this variable in our model development.
 
 
-#### Association Between `review_count` and `rating` Relative to `price`
+#### Figure 4: Association Between `review_count` and `rating` Relative to `price`
 ```{r}
 us_rest %>%
   filter(!is.na(city))%>%
@@ -158,6 +91,9 @@ train <- us_rest %>%
 
 test <- us_rest %>%
   anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
 
 # Fit the model
 model_formula <- 
@@ -174,7 +110,6 @@ check <- train %>%
   summarise(MAE = sum(abs(y_hat - rating))/n(),
             MSE = sum((y_hat - rating)^2)/n(),
             SSE = sum((y_hat - rating)^2))
-check
 
 
 # Get predictions from test set
@@ -200,13 +135,16 @@ step$anova # display results
 
 #### Model 2: Spline
 ```{r}
-set.seed(3)
+set.seed(1)
 # Randomly divide the sample into training and test set
 train <- us_rest %>%
   sample_n(450)
 
 test <- us_rest %>%
   anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
 
 # Fit the model
 model_spline <- smooth.spline(x=train$review_count, y=train$rating, df=10) 
@@ -260,18 +198,24 @@ test_results <- rbind(test_results, test_result)
 ### Categorical Outcome Variable with > 2 levels
 #### Model 3: CART
 ```{r}
-set.seed(5)
+set.seed(1)
 # Randomly divide the sample into training and test set
 train <- us_rest %>%
   sample_n(450)
 
-train$rating[c(21,26, 109, 154, 177, 227, 231, 308, 314)] <- "low"
-mutate(train, rating == as.factor(rating))
-
 test <- us_rest %>%
-  anti_join(train, by="phone") 
-test$rating[8] <- "low"
-mutate(test, rating == as.factor(rating))
+  anti_join(train, by="phone")
+# Matched by unique phone numbers, but needed to include the one location 
+# that does not have a phone number.
+test <- rbind(test, us_rest[1,])
+test$rating <- as.character(test$rating)
+
+# because the test set does not possess any `rating` observations that are below
+# 4.0 and there are only 6 observations that are below 4.0 in the training set then
+# we will get ride of these few observations and proceed for the classification
+# algorithm
+train <- train[-(c(56, 108, 181, 220, 270, 380)), ]
+train$rating <- as.character(train$rating)
 
 
 # Fit the model
@@ -279,13 +223,6 @@ model_formula <-
   as.formula("rating ~ review_count + distance + is_open + price_2 + latitude + longitude + city")
 tree_parameters <- rpart.control(maxdepth = 3)
 model_CART <- rpart(model_formula, data = train, control=tree_parameters)
-
-
-# Tree Diagram
-plot(model_CART, margin=0.25)
-text(model_CART, use.n = TRUE)
-title("Predicting Rating using Review Count")
-box()
 
 # compare the score of the training set with the test set
 p_hat_matrix <- model_CART %>% 
@@ -295,9 +232,8 @@ y_hat <- model_CART %>%
   predict(newdata=train, type="class")
 
 # Score/error
-MLmetrics::Accuracy(y_true = train$rating, y_pred = y_hat) # getting error because there are 5 levels in the the training set and only 4 levels in the test set
+MLmetrics::Accuracy(y_true = train$rating, y_pred = y_hat) 
 MLmetrics::ConfusionMatrix(y_true = train$rating, y_pred = y_hat)
-
 
 
 # predictions on test set
@@ -305,14 +241,9 @@ p_hat_matrix <- model_CART %>%
   predict(type = "prob", newdata = test)
 
 y_hat <- model_CART %>% 
-  predict(newdata=test, type="class")
+  predict(newdata=test, type="class") %>%
+  as.character() 
+test <- mutate(test, y_hat = y_hat)
 
-# Score/error
+# Percentage of correct ratings
 MLmetrics::Accuracy(y_true = test$rating, y_pred = y_hat) 
-MLmetrics::ConfusionMatrix(y_true = test$rating, y_pred = y_hat)
-```
-
-
-# Conclusion
-
-

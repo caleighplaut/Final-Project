@@ -87,7 +87,8 @@ us_rest %>%
   
 #### Figure 4: Map of 10 Largest Cities in the US
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-qmplot(longitude, latitude, data = us_rest, colour = I('red'), size = I(3), darken = .3, zoom = 5)
+qmplot(longitude, latitude, data=us_rest, colour=I('red'), size=I(3.5), zoom=6)
+
 ``` 
 
   The response variable in our models is called `rating` in the Yelp API and indicates the rating of a given business according to Yelp. It is a discrete variable and has the type decimal—its possible values are 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5 and 5. Thus, there is a tight range of values that the models can predict for rating. We used the numeric variable `review_count` as a predictor in all our models. `review_count` refers to the number of reviews for a given business and has type int. Geographic variables, such as `distance` (refers to the distance in meters from the search location), `latitude` (of a given business) and `longitude` (of a given business), have the type decimal and are included in our first model, multivariate linear regression model, and last model, classification algorithm. 

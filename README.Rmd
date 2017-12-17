@@ -10,7 +10,7 @@ To reproduce our results follow these steps:
 2. run Code.rmd
 
 Write-Up:
-We have included the .rmd file and the .html file below with the prefix name "Final_WriteUp"
+We have included the .rmd file and the .html file with the prefix name "Final_WriteUp"
 
 Note: to resave new data from our API run API_Data.Rmd
 

@@ -87,7 +87,7 @@ us_rest %>%
   
 #### Figure 4: Map of 10 Largest Cities in the US
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
-qmplot(longitude, latitude, data=us_rest, colour=I('red'), size=I(3.5), zoom=6)
+qmplot(longitude, latitude, data=us_rest, colour=I('red'), size=I(3), zoom=6)
 
 ``` 
 

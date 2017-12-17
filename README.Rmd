@@ -1,0 +1,12 @@
+---
+title: "Yelp Restaurant Rating Model"
+author: "Caleigh Plaut and Meredith Manley"
+date: "12/18/19"
+output: github_document
+---
+
+To reproduce our results follow these steps:
+1. download our data saved as us_rest.csv to your working directory
+2. run Code.rmd
+
+Note: to resave new data from our API run API_Data.Rmd

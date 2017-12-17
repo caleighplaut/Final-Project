@@ -28,21 +28,14 @@ library(rpart)
 library(ggmap)
 
 us_rest <- read_csv("us_rest.csv")
-    
-# Store test results for each model
-test_results <- as.data.frame(c())
-
 ```
 
 
-## Exploratory Analysis
+# Exploratory Analysis
 #### Figure 1: Map of 10 Largest Cities in the US
 ```{r}
 qmplot(longitude, latitude, data = us_rest, colour = I('red'), size = I(3), darken = .3, zoom = 5)
 ``` 
-
-> 
-
 
 
 #### Figure 2: Distribution of Outcome Variable  - `rating`
@@ -53,8 +46,6 @@ us_rest %>%
     labs(title = "Count of US Restaurants by Respective Rating")
 ```
 
-> As you can see, most resutrants got a rating of 4.0, which is high since the ratings are 1-5. All restaurant ratings are somewhat bias upwards, so finding one under 4.0 is fairly rare. Also, finding a resutrant with a rating of 5.0 is rare.  Shows the distribution of our outcome variable, which given the limited range of ratings, appears to be fairly normal. Looking at this plot is important because had it been significantly skewed to the right or to the left we may have needed to include some kind of transformation before we began developing our models.
-
 
 #### Figure 3: Association Between `distance` and `rating`
 ```{r}
@@ -62,8 +53,6 @@ us_rest %>%
         ggplot(aes(x=distance, y=rating)) + geom_point() +
         labs(title = "Association Between Distance and Rating")
 ```
-
-> The distance variable refers to how far away a given restaurant is from the city that was searched measured in meters regardless of what metric system the desired city uses. One hypothesis that we had was that restaurants that are further from the city center would have a lower rating because they do not experience as much traffic as those downtown and thus may not have as many reviews or customers to rate their experience. From this plot we can see that is it hard to determine if that is true or not.  However, we can see that those restaurants that received the highest rating of 5.0 were all  within approximately 8,000 meters or 5 miles from the searched city and those cities that were furthest away from the searched city received lower ratings of 4.0. This observations are not conclusive in terms of predictability especially given that the correlation between distance and rating is close to zero (-0.007929708), but provide some evidence that we should include this variable in our model development.
 
 
 #### Figure 4: Association Between `review_count` and `rating` Relative to `price`
@@ -74,12 +63,7 @@ us_rest %>%
 cor(us_rest$review_count, us_rest$rating)
 ```
 
-> In this plot we see review count on the x axis and restaurant rating on the y-axis with color indicating the price. This scatterplot differs from the previous plot of the relationship between rating and distance because we have used the jitter feature within the ggplot package so that we can more easily see the different price value for each unique observation. However it does not appear that price varies however remains constant across the plot, so from this graphic it does not appear that price would have a predictive effect on rating. On the other hand, review_count has a moderately strong negative correlation of -0.2554035 with rating and thus we would cautiously say that as review count increases the rating of a given establishment seems to decrease. Given this analysis it would also be beneficial to include this variable in the model development.
-
-# Results
-
-
-# Diagnostics
+# Modeling
 ### Continuous Outcome Variable
 
 #### Model 1: Multiple Linear Regression
@@ -122,15 +106,11 @@ test_result <- test %>%
   summarise(MAE = sum(abs(y_hat - rating))/n(),
             MSE = sum((y_hat - rating)^2)/n(),
             SSE = sum((y_hat - rating)^2))
-test_result 
-test_results <- rbind(test_results, test_result)
 
 # Variable selection with Stepwise Regression
 step <- stepAIC(model_mlm, direction="both")
 step$anova # display results
 ```
-
-> Discussion: We decided to start off looking at a model that includes all numeric variables in the training set and compute an initial MSE value from the test set which we can compare with other models. Based on our results we then ran a stepwise regression to determine which model would be the best fit for the data. It turns out that the most accurate linear model only includes `review_count` as a predictor variable, so we will explore the simple linear regression model using `review_count` to predict `rating.` 
 
 
 #### Model 2: Spline
@@ -158,7 +138,6 @@ check <- train %>%
   summarise(MAE = sum(abs(y_hat - rating))/n(),
             MSE = sum((y_hat - rating)^2)/n(),
             SSE = sum((y_hat - rating)^2))
-check
 
 
 
@@ -188,11 +167,7 @@ test_result <- test %>%
   summarise(MAE = sum(abs(y_hat - rating))/n(),
             MSE = sum((y_hat - rating)^2)/n(),
             SSE = sum((y_hat - rating)^2))
-test_result 
-test_results <- rbind(test_results, test_result)
 ```
-
-> Discussion: Explain what is a spline model. Used df=10 because... Does not have a lower MSE value compared to the simple linear regression model
 
 
 ### Categorical Outcome Variable with > 2 levels
@@ -247,3 +222,5 @@ test <- mutate(test, y_hat = y_hat)
 
 # Percentage of correct ratings
 MLmetrics::Accuracy(y_true = test$rating, y_pred = y_hat) 
+```
+
